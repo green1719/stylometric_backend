@@ -8,6 +8,7 @@ import (
 )
 
 const verifiedTokenContextKey = "stylometry_verified_token"
+const sessionIDContextKey = "stylometry_session_id"
 
 // UserExists проверяет существование пользователя в PostgreSQL.
 type UserExists func(uint) (bool, error)
@@ -32,6 +33,57 @@ func VerifiedTokenFromContext(ctx *gin.Context) (VerifiedToken, bool) {
 		return VerifiedToken{}, false
 	}
 	return token, true
+}
+
+// SessionIDFromContext возвращает sessionId, если запрос аутентифицирован cookie.
+func SessionIDFromContext(ctx *gin.Context) (string, bool) {
+	value, exists := ctx.Get(sessionIDContextKey)
+	sessionID, ok := value.(string)
+	return sessionID, exists && ok && sessionID != ""
+}
+
+// RequireSessionOrJWT принимает sessionId cookie. Bearer JWT остаётся совместимым
+// с уже существующими клиентами и не влияет на остальные маршруты.
+func RequireSessionOrJWT(issuer *Issuer, userExists UserExists, blacklist Blacklist, sessions SessionStore) gin.HandlerFunc {
+	return verifySessionOrJWT(issuer, userExists, blacklist, sessions, true)
+}
+
+// OptionalSessionOrJWT оставляет просмотр публичным, но распознаёт пользователя
+// по sessionId cookie или уже поддерживаемому Bearer JWT.
+func OptionalSessionOrJWT(issuer *Issuer, userExists UserExists, blacklist Blacklist, sessions SessionStore) gin.HandlerFunc {
+	return verifySessionOrJWT(issuer, userExists, blacklist, sessions, false)
+}
+
+func verifySessionOrJWT(issuer *Issuer, userExists UserExists, blacklist Blacklist, sessions SessionStore, required bool) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		sessionID, cookieErr := ctx.Cookie(SessionCookieName)
+		if cookieErr == nil && strings.TrimSpace(sessionID) != "" {
+			userID, found, err := sessions.UserID(ctx.Request.Context(), sessionID)
+			if err != nil {
+				ctx.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "проверка sessionId в Redis временно недоступна"})
+				return
+			}
+			if !found {
+				ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "требуется действительная sessionId cookie"})
+				return
+			}
+			exists, err := userExists(userID)
+			if err != nil {
+				ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "ошибка базы данных"})
+				return
+			}
+			if !exists {
+				ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "требуется действительная sessionId cookie"})
+				return
+			}
+			ctx.Set(verifiedTokenContextKey, VerifiedToken{UserID: userID})
+			ctx.Set(sessionIDContextKey, sessionID)
+			ctx.Next()
+			return
+		}
+
+		verifyJWT(issuer, userExists, blacklist, required)(ctx)
+	}
 }
 
 // RequireJWT требует действительный Bearer JWT для операции создателя.

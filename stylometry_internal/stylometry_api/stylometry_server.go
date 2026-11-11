@@ -33,9 +33,13 @@ func StartServer() {
 	if err != nil {
 		logrus.Fatal("ошибка подключения к Redis: ", err)
 	}
-	sampleHandler := handler.NewSampleHandler(repo, issuer, blacklist)
-	requireJWT := auth.RequireJWT(issuer, repo.UserExists, blacklist)
-	optionalJWT := auth.OptionalJWT(issuer, repo.UserExists, blacklist)
+	sessions, err := auth.NewRedisSessionStoreFromEnv()
+	if err != nil {
+		logrus.Fatal("ошибка подключения к Redis: ", err)
+	}
+	sampleHandler := handler.NewSampleHandler(repo, issuer, blacklist, sessions)
+	requireJWT := auth.RequireSessionOrJWT(issuer, repo.UserExists, blacklist, sessions)
+	optionalJWT := auth.OptionalSessionOrJWT(issuer, repo.UserExists, blacklist, sessions)
 
 	router := gin.Default()
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))

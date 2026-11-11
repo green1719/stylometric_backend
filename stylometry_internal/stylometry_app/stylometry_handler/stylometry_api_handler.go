@@ -511,6 +511,20 @@ func (stylometry_h *SampleHandler) APIPostAuthLogin(stylometry_ctx *gin.Context)
 		stylometry_ctx.JSON(http.StatusInternalServerError, gin.H{"error": "не удалось выполнить вход"})
 		return
 	}
+	stylometry_session_id, stylometry_err := stylometry_h.Sessions.Create(stylometry_ctx.Request.Context(), stylometry_user.ID)
+	if stylometry_err != nil {
+		logrus.Error("не удалось создать сессию в Redis: ", stylometry_err)
+		stylometry_ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "не удалось создать сессию"})
+		return
+	}
+	http.SetCookie(stylometry_ctx.Writer, &http.Cookie{
+		Name:     auth.SessionCookieName,
+		Value:    stylometry_session_id,
+		Path:     "/",
+		MaxAge:   int(auth.SessionTTL.Seconds()),
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
 
 	stylometry_ctx.JSON(http.StatusOK, gin.H{
 		"access_token": stylometry_token,
@@ -530,6 +544,15 @@ func (stylometry_h *SampleHandler) APIPostAuthLogin(stylometry_ctx *gin.Context)
 // @Security BearerJWT
 // @Router /api/auth/logout [post]
 func (stylometry_h *SampleHandler) APIPostAuthLogout(stylometry_ctx *gin.Context) {
+	if stylometry_session_id, stylometry_has_session := auth.SessionIDFromContext(stylometry_ctx); stylometry_has_session {
+		if stylometry_err := stylometry_h.Sessions.Destroy(stylometry_ctx.Request.Context(), stylometry_session_id); stylometry_err != nil {
+			stylometry_ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "не удалось удалить сессию из Redis"})
+			return
+		}
+		http.SetCookie(stylometry_ctx.Writer, &http.Cookie{Name: auth.SessionCookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+		stylometry_ctx.JSON(http.StatusOK, gin.H{"deauthenticated": true, "stylometry_auth_comment": "sessionId удалён из Redis"})
+		return
+	}
 	stylometry_token, stylometry_ok := auth.VerifiedTokenFromContext(stylometry_ctx)
 	if !stylometry_ok {
 		stylometry_ctx.JSON(http.StatusUnauthorized, gin.H{"error": "требуется действительный Bearer JWT"})

@@ -26,11 +26,12 @@ type SampleHandler struct {
 	Repository  *repository.Repository
 	TokenIssuer *auth.Issuer
 	Blacklist   auth.Blacklist
+	Sessions    auth.SessionStore
 }
 
 // NewSampleHandler создаёт HTTP-контроллер.
-func NewSampleHandler(stylometry_r *repository.Repository, stylometry_issuer *auth.Issuer, stylometry_blacklist auth.Blacklist) *SampleHandler {
-	return &SampleHandler{Repository: stylometry_r, TokenIssuer: stylometry_issuer, Blacklist: stylometry_blacklist}
+func NewSampleHandler(stylometry_r *repository.Repository, stylometry_issuer *auth.Issuer, stylometry_blacklist auth.Blacklist, stylometry_sessions auth.SessionStore) *SampleHandler {
+	return &SampleHandler{Repository: stylometry_r, TokenIssuer: stylometry_issuer, Blacklist: stylometry_blacklist, Sessions: stylometry_sessions}
 }
 
 // stylometryFormatLen красиво форматирует float64 для HTML.
